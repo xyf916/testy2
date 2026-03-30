@@ -1,0 +1,139 @@
+{
+  "name": "fr-reference-detector",
+  "displayName": "FR Reference Detector",
+  "description": "Detects FR{number} patterns and displays associated Word documents in VSCode",
+  "version": "1.0.0",
+  "publisher": "your-publisher-name",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:cpp",
+    "onLanguage:c",
+    "onLanguage:ada",
+    "onView:frSearchPanel"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "frSearch",
+          "title": "FR Search",
+          "icon": "resources/fr-search.svg"
+        }
+      ]
+    },
+    "views": {
+      "frSearch": [
+        {
+          "type": "webview",
+          "id": "frSearchPanel",
+          "name": "FR Documents"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "frDetector.openFR",
+        "title": "Open FR Document"
+      },
+      {
+        "command": "frDetector.refreshCache",
+        "title": "FR Detector: Refresh Document Cache"
+      },
+      {
+        "command": "frDetector.ingestDocuments",
+        "title": "FR Detector: Ingest Documents"
+      },
+      {
+        "command": "frDetector.searchFR",
+        "title": "FR Detector: Search Documents"
+      }
+    ],
+    "configuration": {
+      "title": "FR Reference Detector",
+      "properties": {
+        "frDetector.frFolderPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a single FR folder (legacy). Use frFolderPaths for multiple folders."
+        },
+        "frDetector.frFolderPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "One or more root folder paths containing FR documents. Used by ingestion and search. Overrides frFolderPath when set."
+        },
+        "frDetector.includePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns for files to include during ingestion (e.g. [\"**/*.docx\"]). Defaults to all .docx and .doc files."
+        },
+        "frDetector.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns for files to exclude during ingestion (e.g. [\"**/archive/**\", \"**/old/**\"])."
+        },
+        "frDetector.pythonPath": {
+          "type": "string",
+          "default": "C:\\Users\\nicko\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+          "description": "Path to Python executable"
+        },
+        "frDetector.previewLength": {
+          "type": "number",
+          "default": 200,
+          "description": "Number of characters to show in hover preview"
+        }
+      }
+    },
+    "languages": [
+      {
+        "id": "ada",
+        "extensions": [
+          ".adb",
+          ".ads",
+          ".ada"
+        ],
+        "aliases": [
+          "Ada"
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.74.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "docx": "^9.5.1",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "mammoth": "^1.11.0",
+    "undici-types": "^6.21.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

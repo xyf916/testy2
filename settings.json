@@ -1,0 +1,12 @@
+// {
+//     "frDetector.pythonPath": "C:\\Users\\nicko\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+//     "frDetector.frDirectory": "C:\\FR"
+//     // "git.ignoreLimitWarning": true
+
+// }
+{
+  "frDetector.pythonPath": "C:\\Users\\nicko\\AppData\\Local\\Programs\\Python\\Python313\\python.exe",
+  // "frDetector.frFolderPath": "C:\\Users\\nicko\\fr-reference-detector\\FR",
+  "frDetector.frFolderPath": "C:\\Users\\nicko\\FR",
+  "git.ignoreLimitWarning": true
+}
