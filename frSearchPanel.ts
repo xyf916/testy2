@@ -40,17 +40,6 @@ export class FRSearchPanel implements vscode.WebviewViewProvider {
                     }
                     break;
 
-                case 'getFilters':
-                    try {
-                        const opts = await this._service.getFilterOptions();
-                        webviewView.webview.postMessage({ command: 'filterOptions', ...opts });
-                    } catch {
-                        webviewView.webview.postMessage({
-                            command: 'filterOptions',
-                            statuses: [], severities: [], subsystems: []
-                        });
-                    }
-                    break;
 
                 case 'openFR':
                     vscode.commands.executeCommand('frDetector.openFR', message.frNumber, message.filePath);
@@ -59,11 +48,9 @@ export class FRSearchPanel implements vscode.WebviewViewProvider {
         });
     }
 
-    /** Call after ingestion completes to refresh the filter dropdowns. */
+    /** Call after ingestion completes to signal that the index is ready. */
     public refresh(): void {
-        if (this._view) {
-            this._view.webview.postMessage({ command: 'getFilters' });
-        }
+        // No-op: text filter inputs do not need to be repopulated.
     }
 
     private _getNonce(): string {
@@ -96,9 +83,10 @@ export class FRSearchPanel implements vscode.WebviewViewProvider {
             '#searchInput { width: 100%; padding: 5px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: var(--vscode-font-size); font-family: var(--vscode-font-family); outline: none; margin-bottom: 6px; }',
             '#searchInput:focus { border-color: var(--vscode-focusBorder); }',
             '#searchInput::placeholder { color: var(--vscode-input-placeholderForeground); }',
-            '.filters { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }',
-            'select { flex: 1; min-width: 0; padding: 3px 5px; background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border, transparent); border-radius: 2px; font-size: 11px; font-family: var(--vscode-font-family); outline: none; cursor: pointer; }',
-            'select:focus { border-color: var(--vscode-focusBorder); }',
+            '.filters { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }',
+            '.filter-input { width: 100%; padding: 3px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: 11px; font-family: var(--vscode-font-family); outline: none; }',
+            '.filter-input:focus { border-color: var(--vscode-focusBorder); }',
+            '.filter-input::placeholder { color: var(--vscode-input-placeholderForeground); }',
             '#statusBar { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 6px; min-height: 16px; padding-left: 2px; }',
             '.result-item { padding: 6px 8px; margin-bottom: 1px; border-radius: 2px; cursor: pointer; border-left: 2px solid transparent; }',
             '.result-item:hover { background: var(--vscode-list-hoverBackground); border-left-color: var(--vscode-focusBorder); }',
@@ -116,35 +104,24 @@ export class FRSearchPanel implements vscode.WebviewViewProvider {
             'const vscode = acquireVsCodeApi();',
             'let debounceTimer = null;',
             'console.log("[FR Search] panel script loaded");',
-            'vscode.postMessage({ command: "getFilters" });',
             'document.getElementById("searchInput").addEventListener("input", function() { clearTimeout(debounceTimer); debounceTimer = setTimeout(doSearch, 300); });',
-            'document.getElementById("statusFilter").addEventListener("change", doSearch);',
-            'document.getElementById("severityFilter").addEventListener("change", doSearch);',
-            'document.getElementById("subsystemFilter").addEventListener("change", doSearch);',
+            'document.getElementById("originatorFilter").addEventListener("input", function() { clearTimeout(debounceTimer); debounceTimer = setTimeout(doSearch, 300); });',
+            'document.getElementById("frNumberFilter").addEventListener("input", function() { clearTimeout(debounceTimer); debounceTimer = setTimeout(doSearch, 300); });',
             'function doSearch() {',
             '  var query = document.getElementById("searchInput").value.trim();',
-            '  var status = document.getElementById("statusFilter").value;',
-            '  var severity = document.getElementById("severityFilter").value;',
-            '  var subsystem = document.getElementById("subsystemFilter").value;',
-            '  if (!query && !status && !severity && !subsystem) { document.getElementById("resultsList").innerHTML = ""; document.getElementById("statusBar").textContent = "Ready"; return; }',
+            '  var originator = document.getElementById("originatorFilter").value.trim();',
+            '  var frNumber = document.getElementById("frNumberFilter").value.trim();',
+            '  if (!query && !originator && !frNumber) { document.getElementById("resultsList").innerHTML = ""; document.getElementById("statusBar").textContent = "Ready"; return; }',
             '  console.log("[FR Search] searching:", query);',
             '  document.getElementById("statusBar").textContent = "Searching...";',
-            '  vscode.postMessage({ command: "search", query: query, filters: { status: status, severity: severity, subsystem: subsystem } });',
+            '  vscode.postMessage({ command: "search", query: query, filters: { originator: originator, frNumber: frNumber } });',
             '}',
             'window.addEventListener("message", function(event) {',
             '  var msg = event.data;',
             '  console.log("[FR Search] received:", msg.command);',
             '  if (msg.command === "results") { renderResults(msg.results); }',
-            '  else if (msg.command === "filterOptions") { populateSelect("statusFilter", "Status: Any", msg.statuses || []); populateSelect("severityFilter", "Severity: Any", msg.severities || []); populateSelect("subsystemFilter", "Subsystem: Any", msg.subsystems || []); }',
             '  else if (msg.command === "error") { handleError(msg.message); }',
-            '  else if (msg.command === "getFilters") { vscode.postMessage({ command: "getFilters" }); }',
             '});',
-            'function populateSelect(id, placeholder, options) {',
-            '  var sel = document.getElementById(id); var cur = sel.value;',
-            '  sel.innerHTML = "<option value=\\"\\">"+placeholder+"</option>";',
-            '  options.forEach(function(opt) { var o = document.createElement("option"); o.value = opt; o.textContent = opt; sel.appendChild(o); });',
-            '  if (cur) { sel.value = cur; }',
-            '}',
             'function handleError(message) {',
             '  var list = document.getElementById("resultsList");',
             '  document.getElementById("statusBar").textContent = "";',
@@ -179,9 +156,8 @@ export class FRSearchPanel implements vscode.WebviewViewProvider {
             '</head><body>' +
             '<input id="searchInput" type="text" placeholder="Search FR documents..." autocomplete="off" spellcheck="false">' +
             '<div class="filters">' +
-            '<select id="statusFilter"><option value="">Status: Any</option></select>' +
-            '<select id="severityFilter"><option value="">Severity: Any</option></select>' +
-            '<select id="subsystemFilter"><option value="">Subsystem: Any</option></select>' +
+            '<input id="originatorFilter" class="filter-input" type="text" placeholder="Originator name..." autocomplete="off" spellcheck="false">' +
+            '<input id="frNumberFilter" class="filter-input" type="text" placeholder="FR number (e.g. 123)..." autocomplete="off" spellcheck="false">' +
             '</div>' +
             '<div id="statusBar">Ready</div>' +
             '<div id="resultsList"></div>' +
