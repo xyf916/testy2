@@ -250,7 +250,32 @@ def read_doc(file_path):
 # Full-text search (requires prior ingestion via ingest_fr.py)
 # ---------------------------------------------------------------------------
 
-def search_fr(db_path, query, status_filter="", severity_filter="", subsystem_filter="", limit=50):
+def _ensure_originator_column(conn):
+    """Add originator column to fr_documents if it does not yet exist."""
+    try:
+        conn.execute("ALTER TABLE fr_documents ADD COLUMN originator TEXT DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
+
+def _rows_to_results(rows):
+    return [
+        {
+            "frNumber":   row[0],
+            "title":      row[1],
+            "snippet":    row[2],
+            "subsystem":  row[3],
+            "severity":   row[4],
+            "status":     row[5],
+            "filePath":   row[6],
+            "originator": row[7] or "",
+        }
+        for row in rows
+    ]
+
+
+def search_fr(db_path, query, originator_filter="", fr_number_filter="", limit=50):
     """Query the FTS index.  Returns {"results": [...]} or {"results": [], "error": "not_indexed"}."""
     try:
         conn = sqlite3.connect(db_path)
@@ -263,65 +288,69 @@ def search_fr(db_path, query, status_filter="", severity_filter="", subsystem_fi
             conn.close()
             return {"results": [], "error": "not_indexed"}
 
-        params = []
+        # Ensure originator column exists (migration for databases created before this field was added)
+        _ensure_originator_column(conn)
+
         q = (query or "").strip()
 
+        # --- FTS path (when there is a keyword query) ---
         if q:
-            sql = '''
+            fts_sql = '''
                 SELECT fr_fts.fr_number,
                        fr_fts.title,
                        snippet(fr_fts, 2, '<<', '>>', '...', 20) AS snippet,
-                       d.subsystem, d.severity, d.status, d.file_path
+                       d.subsystem, d.severity, d.status, d.file_path,
+                       COALESCE(d.originator, '') AS originator
                 FROM fr_fts
                 JOIN fr_documents d ON d.fr_number = fr_fts.fr_number
                 WHERE fr_fts MATCH ?
             '''
-            params.append(q)
-        else:
-            sql = '''
-                SELECT fr_number, title, '' AS snippet,
-                       subsystem, severity, status, file_path
-                FROM fr_documents
-                WHERE 1=1
-            '''
+            params = [q]
+            if originator_filter:
+                fts_sql += ' AND COALESCE(d.originator, \'\') LIKE ?'
+                params.append(f'%{originator_filter}%')
+            if fr_number_filter:
+                fts_sql += ' AND d.fr_number LIKE ?'
+                params.append(f'%{fr_number_filter}%')
+            fts_sql += ' ORDER BY rank LIMIT ?'
+            params.append(limit)
 
-        if status_filter:
-            col = 'd.status' if q else 'status'
-            sql += f' AND {col} LIKE ?'
-            params.append(f'%{status_filter}%')
-        if severity_filter:
-            col = 'd.severity' if q else 'severity'
-            sql += f' AND {col} LIKE ?'
-            params.append(f'%{severity_filter}%')
-        if subsystem_filter:
-            col = 'd.subsystem' if q else 'subsystem'
-            sql += f' AND {col} LIKE ?'
-            params.append(f'%{subsystem_filter}%')
+            try:
+                rows = conn.execute(fts_sql, params).fetchall()
+                conn.close()
+                return {"results": _rows_to_results(rows)}
+            except Exception:
+                # FTS syntax error — fall through to LIKE-based search below
+                pass
+
+        # --- Non-FTS path (filter-only or FTS fallback) ---
+        sql = '''
+            SELECT fr_number, title, '' AS snippet,
+                   subsystem, severity, status, file_path,
+                   COALESCE(originator, '') AS originator
+            FROM fr_documents
+            WHERE 1=1
+        '''
+        params = []
 
         if q:
-            sql += ' ORDER BY rank'
-        else:
-            sql += ' ORDER BY CAST(fr_number AS INTEGER)'
+            # FTS failed: fall back to case-insensitive LIKE on title + body is not stored here,
+            # so just match on title for the fallback path.
+            sql += ' AND title LIKE ?'
+            params.append(f'%{q}%')
+        if originator_filter:
+            sql += ' AND COALESCE(originator, \'\') LIKE ?'
+            params.append(f'%{originator_filter}%')
+        if fr_number_filter:
+            sql += ' AND fr_number LIKE ?'
+            params.append(f'%{fr_number_filter}%')
 
-        sql += ' LIMIT ?'
+        sql += ' ORDER BY CAST(fr_number AS INTEGER) LIMIT ?'
         params.append(limit)
 
         rows = conn.execute(sql, params).fetchall()
         conn.close()
-
-        results = [
-            {
-                "frNumber":  row[0],
-                "title":     row[1],
-                "snippet":   row[2],
-                "subsystem": row[3],
-                "severity":  row[4],
-                "status":    row[5],
-                "filePath":  row[6],
-            }
-            for row in rows
-        ]
-        return {"results": results}
+        return {"results": _rows_to_results(rows)}
 
     except Exception as e:
         return {"results": [], "error": str(e)}
@@ -426,14 +455,13 @@ def main():
         print(json.dumps({"ok": True}))
         return
 
-    # search <db_path> <query> [status] [severity] [subsystem]
+    # search <db_path> <query> [originator] [fr_number_filter]
     if command == "search":
-        db_path        = sys.argv[2] if len(sys.argv) > 2 else None
-        query          = sys.argv[3] if len(sys.argv) > 3 else ""
-        status_filter  = sys.argv[4] if len(sys.argv) > 4 else ""
-        severity_filter= sys.argv[5] if len(sys.argv) > 5 else ""
-        subsystem_filter=sys.argv[6] if len(sys.argv) > 6 else ""
-        result = search_fr(db_path, query, status_filter, severity_filter, subsystem_filter)
+        db_path          = sys.argv[2] if len(sys.argv) > 2 else None
+        query            = sys.argv[3] if len(sys.argv) > 3 else ""
+        originator_filter= sys.argv[4] if len(sys.argv) > 4 else ""
+        fr_number_filter = sys.argv[5] if len(sys.argv) > 5 else ""
+        result = search_fr(db_path, query, originator_filter, fr_number_filter)
         print(json.dumps(result))
         return
 
