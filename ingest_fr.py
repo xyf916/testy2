@@ -51,6 +51,7 @@ def init_search_db(db_path):
             status      TEXT,
             date_str    TEXT,
             authors     TEXT,
+            originator  TEXT,
             file_path   TEXT,
             ingested_at INTEGER
         );
@@ -63,6 +64,12 @@ def init_search_db(db_path):
         );
     ''')
     conn.commit()
+    # Migration: add originator column if it was missing from an older schema
+    try:
+        conn.execute("ALTER TABLE fr_documents ADD COLUMN originator TEXT DEFAULT ''")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
     conn.close()
 
 
@@ -75,8 +82,8 @@ def upsert_document(conn, fr_number, title, meta, file_path, body_text):
     conn.execute(
         '''INSERT OR REPLACE INTO fr_documents
                (fr_number, title, subsystem, severity, status,
-                date_str, authors, file_path, ingested_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                date_str, authors, originator, file_path, ingested_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (
             fr_number,
             title,
@@ -85,6 +92,7 @@ def upsert_document(conn, fr_number, title, meta, file_path, body_text):
             meta.get("status", ""),
             meta.get("date_str", ""),
             meta.get("authors", ""),
+            meta.get("originator", ""),
             file_path,
             int(time.time()),
         ),
@@ -102,14 +110,15 @@ def upsert_document(conn, fr_number, title, meta, file_path, body_text):
 
 def extract_metadata(text):
     """Try to find structured fields anywhere in the document body."""
-    meta = {"status": "", "severity": "", "subsystem": "", "date_str": "", "authors": ""}
+    meta = {"status": "", "severity": "", "subsystem": "", "date_str": "", "authors": "", "originator": ""}
 
     patterns = {
-        "status":    r'status\s*[:\-]\s*([^\n\r,;]{1,40})',
-        "severity":  r'severity\s*[:\-]\s*([^\n\r,;]{1,40})',
-        "subsystem": r'subsystem\s*[:\-]\s*([^\n\r,;]{1,60})',
-        "date_str":  r'(?:date|dated)\s*[:\-]\s*([^\n\r,;]{1,30})',
-        "authors":   r'(?:author|prepared\s+by|written\s+by|submitted\s+by)\s*[:\-]\s*([^\n\r,;]{1,80})',
+        "status":     r'status\s*[:\-]\s*([^\n\r,;]{1,40})',
+        "severity":   r'severity\s*[:\-]\s*([^\n\r,;]{1,40})',
+        "subsystem":  r'subsystem\s*[:\-]\s*([^\n\r,;]{1,60})',
+        "date_str":   r'(?:date|dated)\s*[:\-]\s*([^\n\r,;]{1,30})',
+        "authors":    r'(?:author|prepared\s+by|written\s+by|submitted\s+by)\s*[:\-]\s*([^\n\r,;]{1,80})',
+        "originator": r'originator(?:\s+name)?\s*[:\-]\s*([^\n\r,;]{1,80})',
     }
 
     for field, pattern in patterns.items():
