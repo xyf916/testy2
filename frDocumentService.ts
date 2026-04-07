@@ -28,6 +28,7 @@ export interface FRSearchResult {
     severity: string;
     status: string;
     filePath: string;
+    originator: string;
 }
 
 export interface FRFilterOptions {
@@ -245,15 +246,14 @@ export class FRDocumentService {
 
     async searchFR(
         query: string,
-        filters: { status?: string; severity?: string; subsystem?: string }
+        filters: { originator?: string; frNumber?: string }
     ): Promise<FRSearchResult[]> {
         const result = await this.executePythonScript([
             'search',
             this.dbPath,
             query,
-            filters.status    || '',
-            filters.severity  || '',
-            filters.subsystem || '',
+            filters.originator || '',
+            filters.frNumber   || '',
         ]);
 
         const parsed = JSON.parse(result) as { results: FRSearchResult[]; error?: string };
