@@ -124,25 +124,52 @@ def read_docx_for_ingest(file_path):
     return title, body
 
 
+def doc_to_docx(file_path):
+    """Convert a .doc file to a temp .docx using Word, return the temp path."""
+    import pythoncom  # type: ignore[import]
+    import tempfile
+    import shutil
+
+    tmp_dir = tempfile.gettempdir()
+    pid = os.getpid()
+    tmp_doc  = os.path.join(tmp_dir, f"fr_ingest_tmp_{pid}.doc")
+    tmp_docx = os.path.join(tmp_dir, f"fr_ingest_tmp_{pid}.docx")
+    shutil.copy2(file_path, tmp_doc)
+
+    pythoncom.CoInitialize()
+    word = None
+    try:
+        word = win32com.client.DispatchEx("Word.Application")
+        word.Visible = False
+        word.DisplayAlerts = 0
+        doc = word.Documents.Open(os.path.abspath(tmp_doc))
+        doc.SaveAs(tmp_docx, FileFormat=16)  # 16 = wdFormatXMLDocument (.docx)
+        doc.Close(0)
+    finally:
+        try:
+            if word:
+                word.Quit()
+        except Exception:
+            pass
+        pythoncom.CoUninitialize()
+        try:
+            os.remove(tmp_doc)
+        except Exception:
+            pass
+    return tmp_docx
+
+
 def read_doc_for_ingest(file_path):
-    """Return (title, body_text) from a legacy .doc file via win32com."""
     if not WIN32_AVAILABLE:
         raise ValueError("pywin32 not installed. Run: pip install pywin32")
-
-    import pythoncom  # type: ignore[import]
-    pythoncom.CoInitialize()
+    tmp = doc_to_docx(file_path)
     try:
-        word = win32com.client.Dispatch("Word.Application")
-        word.Visible = False
-        doc = word.Documents.Open(os.path.abspath(file_path))
-        content = doc.Content.Text
-        doc.Close()
-        word.Quit()
-        lines = [l.strip() for l in content.split("\n") if l.strip()]
-        title = lines[0] if lines else ""
-        return title, content
+        return read_docx_for_ingest(tmp)
     finally:
-        pythoncom.CoUninitialize()
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
