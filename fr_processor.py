@@ -24,7 +24,7 @@ except:
     pass
 
 try:
-    import win32com.client
+    import win32com.client  # type: ignore[import]
     DOC_CONVERTERS.append("win32com")
 except ImportError:
     pass
@@ -210,8 +210,8 @@ def read_docx(file_path):
 
 
 def read_doc_with_win32(file_path):
-    import win32com.client
-    import pythoncom
+    import win32com.client  # type: ignore[import]
+    import pythoncom  # type: ignore[import]
 
     pythoncom.CoInitialize()
     try:
@@ -250,37 +250,9 @@ def read_doc(file_path):
 # Full-text search (requires prior ingestion via ingest_fr.py)
 # ---------------------------------------------------------------------------
 
-def _ensure_originator_column(conn):
-    """Add originator column to fr_documents if it does not yet exist."""
-    try:
-        conn.execute("ALTER TABLE fr_documents ADD COLUMN originator TEXT DEFAULT ''")
-        conn.commit()
-    except Exception:
-        pass  # column already exists
-
-
-def _rows_to_results(rows):
-    return [
-        {
-            "frNumber":   row[0],
-            "title":      row[1],
-            "snippet":    row[2],
-            "subsystem":  row[3],
-            "severity":   row[4],
-            "status":     row[5],
-            "filePath":   row[6],
-            "originator": row[7] or "",
-        }
-        for row in rows
-    ]
-
-
 def search_fr(db_path, query, originator_filter="", fr_number_filter="", limit=50):
-    """Query the FTS index.  Returns {"results": [...]} or {"results": [], "error": "not_indexed"}."""
     try:
         conn = sqlite3.connect(db_path)
-
-        # Check that ingestion tables exist
         existing = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type IN ('table','shadow') AND name IN ('fr_documents','fr_fts')"
         ).fetchall()}
@@ -288,66 +260,49 @@ def search_fr(db_path, query, originator_filter="", fr_number_filter="", limit=5
             conn.close()
             return {"results": [], "error": "not_indexed"}
 
-        # Ensure originator column exists (migration for databases created before this field was added)
-        _ensure_originator_column(conn)
-
         q = (query or "").strip()
-
-        # --- FTS path (when there is a keyword query) ---
-        if q:
-            fts_sql = '''
-                SELECT fr_fts.fr_number,
-                       fr_fts.title,
-                       snippet(fr_fts, 2, '<<', '>>', '...', 20) AS snippet,
-                       d.subsystem, d.severity, d.status, d.file_path,
-                       COALESCE(d.originator, '') AS originator
-                FROM fr_fts
-                JOIN fr_documents d ON d.fr_number = fr_fts.fr_number
-                WHERE fr_fts MATCH ?
-            '''
-            params = [q]
-            if originator_filter:
-                fts_sql += ' AND COALESCE(d.originator, \'\') LIKE ?'
-                params.append(f'%{originator_filter}%')
-            if fr_number_filter:
-                fts_sql += ' AND d.fr_number LIKE ?'
-                params.append(f'%{fr_number_filter}%')
-            fts_sql += ' ORDER BY rank LIMIT ?'
-            params.append(limit)
-
-            try:
-                rows = conn.execute(fts_sql, params).fetchall()
-                conn.close()
-                return {"results": _rows_to_results(rows)}
-            except Exception:
-                # FTS syntax error — fall through to LIKE-based search below
-                pass
-
-        # --- Non-FTS path (filter-only or FTS fallback) ---
-        sql = '''
-            SELECT fr_number, title, '' AS snippet,
-                   subsystem, severity, status, file_path,
-                   COALESCE(originator, '') AS originator
-            FROM fr_documents
-            WHERE 1=1
-        '''
         params = []
 
         if q:
-            # FTS failed: fall back to case-insensitive LIKE on title + body is not stored here,
-            # so just match on title for the fallback path.
-            sql += ' AND title LIKE ?'
-            params.append(f'%{q}%')
+            sql = (
+                "SELECT fr_fts.fr_number, fr_fts.title,"
+                " snippet(fr_fts, 2, '<<', '>>', '...', 20),"
+                " d.file_path, COALESCE(d.originator, '')"
+                " FROM fr_fts JOIN fr_documents d ON d.fr_number = fr_fts.fr_number"
+                " WHERE fr_fts MATCH ?"
+            )
+            params.append(q)
+            if originator_filter:
+                sql += " AND COALESCE(d.originator, '') LIKE ?"
+                params.append('%' + originator_filter + '%')
+            if fr_number_filter:
+                sql += " AND d.fr_number LIKE ?"
+                params.append('%' + fr_number_filter + '%')
+            sql += " ORDER BY rank LIMIT ?"
+            params.append(limit)
+            try:
+                rows = conn.execute(sql, params).fetchall()
+                conn.close()
+                return {"results": _rows_to_results(rows)}
+            except Exception:
+                pass
+
+        sql = (
+            "SELECT fr_number, title, '' AS snippet, file_path,"
+            " COALESCE(originator, '') FROM fr_documents WHERE 1=1"
+        )
+        params = []
+        if q:
+            sql += " AND title LIKE ?"
+            params.append('%' + q + '%')
         if originator_filter:
-            sql += ' AND COALESCE(originator, \'\') LIKE ?'
-            params.append(f'%{originator_filter}%')
+            sql += " AND COALESCE(originator, '') LIKE ?"
+            params.append('%' + originator_filter + '%')
         if fr_number_filter:
-            sql += ' AND fr_number LIKE ?'
-            params.append(f'%{fr_number_filter}%')
-
-        sql += ' ORDER BY CAST(fr_number AS INTEGER) LIMIT ?'
+            sql += " AND fr_number LIKE ?"
+            params.append('%' + fr_number_filter + '%')
+        sql += " ORDER BY CAST(fr_number AS INTEGER) LIMIT ?"
         params.append(limit)
-
         rows = conn.execute(sql, params).fetchall()
         conn.close()
         return {"results": _rows_to_results(rows)}
@@ -356,32 +311,17 @@ def search_fr(db_path, query, originator_filter="", fr_number_filter="", limit=5
         return {"results": [], "error": str(e)}
 
 
-def get_filter_options(db_path):
-    """Return distinct values for the Status / Severity / Subsystem filter dropdowns."""
-    try:
-        conn = sqlite3.connect(db_path)
-
-        existing = {r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='fr_documents'"
-        ).fetchall()}
-        if 'fr_documents' not in existing:
-            conn.close()
-            return {"statuses": [], "severities": [], "subsystems": []}
-
-        def distinct(col):
-            return [r[0] for r in conn.execute(
-                f"SELECT DISTINCT {col} FROM fr_documents WHERE {col} != '' ORDER BY {col}"
-            ).fetchall()]
-
-        result = {
-            "statuses":   distinct("status"),
-            "severities": distinct("severity"),
-            "subsystems": distinct("subsystem"),
-        }
-        conn.close()
-        return result
-    except Exception:
-        return {"statuses": [], "severities": [], "subsystems": []}
+def _rows_to_results(rows):
+    results = []
+    for row in rows:
+        results.append({
+            "frNumber":   row[0],
+            "title":      row[1],
+            "snippet":    row[2],
+            "filePath":   row[3],
+            "originator": row[4] or "",
+        })
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -463,12 +403,6 @@ def main():
         fr_number_filter = sys.argv[5] if len(sys.argv) > 5 else ""
         result = search_fr(db_path, query, originator_filter, fr_number_filter)
         print(json.dumps(result))
-        return
-
-    # filter_options <db_path>
-    if command == "filter_options":
-        db_path = sys.argv[2] if len(sys.argv) > 2 else None
-        print(json.dumps(get_filter_options(db_path)))
         return
 
     # full_by_path <fr_number> <file_path>
