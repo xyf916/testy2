@@ -60,54 +60,22 @@ export class FRWebViewPanel {
 
     private _getHtmlForWebview(frNumber: string, content: FRContent): string {
         const htmlContent = content.html || this._convertToHtml(content.content);
-
         return `<!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FR${frNumber}</title>
-    <style>
-        body {
-            font-family: var(--vscode-font-family, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif);
-            font-size: var(--vscode-font-size, 14px);
-            line-height: 1.6;
-            color: var(--vscode-editor-foreground);
-            background-color: var(--vscode-editor-background);
-            padding: 20px;
-        }
-        h1 {
-            color: var(--vscode-textLink-foreground);
-            border-bottom: 1px solid var(--vscode-panel-border);
-            padding-bottom: 10px;
-        }
-        .content {
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }
-        h2 {
-            color: var(--vscode-textLink-foreground);
-            margin-top: 1.5em;
-        }
-        p {
-            margin: 0.5em 0;
-        }
-        table {
-            border-collapse: collapse;
-            margin: 8px 0;
-            width: auto;
-        }
-        td, th {
-            border: 1px solid var(--vscode-panel-border);
-            padding: 4px 8px;
-        }
-    </style>
+<meta charset="UTF-8">
+<style>
+body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); padding: 20px; }
+h1, h2 { color: var(--vscode-textLink-foreground); }
+h1 { border-bottom: 1px solid var(--vscode-panel-border); padding-bottom: 8px; }
+table { border-collapse: collapse; margin: 8px 0; }
+td, th { border: 1px solid var(--vscode-panel-border); padding: 4px 8px; }
+p { margin: 0.4em 0; }
+</style>
 </head>
 <body>
-    <h1>FR${frNumber}</h1>
-    <div class="content">
-        ${htmlContent}
-    </div>
+<h1>FR${frNumber}</h1>
+<div>${htmlContent}</div>
 </body>
 </html>`;
     }
