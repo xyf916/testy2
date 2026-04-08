@@ -78,7 +78,7 @@ def upsert_document(conn, fr_number, title, originator, file_path, body_text):
 # ---------------------------------------------------------------------------
 
 def extract_originator(text):
-    m = re.search(r'originator(?:\s+name)?\s*[:\-]\s*([^\n\r,;]{1,80})', text, re.IGNORECASE)
+    m = re.search(r'ORIGINATOR\s*\n\s*(.+)', text, re.IGNORECASE)
     if m:
         return m.group(1).strip()
     return ""
