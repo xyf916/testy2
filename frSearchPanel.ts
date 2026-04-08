@@ -3,7 +3,6 @@ import { FRDocumentService } from './frDocumentService';
 
 export class FRSearchPanel implements vscode.WebviewViewProvider {
     public static readonly viewType = 'frSearchPanel';
-
     private _view?: vscode.WebviewView;
 
     constructor(
@@ -17,152 +16,151 @@ export class FRSearchPanel implements vscode.WebviewViewProvider {
         _token: vscode.CancellationToken
     ): void {
         this._view = webviewView;
-
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this._extensionUri]
-        };
-
-        webviewView.webview.html = this._getHtmlFull();
+        webviewView.webview.options = { enableScripts: true, localResourceRoots: [this._extensionUri] };
+        webviewView.webview.html = this._getHtml();
 
         webviewView.webview.onDidReceiveMessage(async (message) => {
-            switch (message.command) {
-                case 'search':
-                    try {
-                        const results = await this._service.searchFR(
-                            message.query,
-                            message.filters || {}
-                        );
-                        webviewView.webview.postMessage({ command: 'results', results });
-                    } catch (err: unknown) {
-                        const msg = err instanceof Error ? err.message : String(err);
-                        webviewView.webview.postMessage({ command: 'error', message: msg });
+            if (message.command === 'search') {
+                try {
+                    const results = await this._service.searchFR(message.query, message.filters || {});
+                    webviewView.webview.postMessage({ command: 'results', results });
+                } catch (err: unknown) {
+                    let msg = 'Unknown error';
+                    if (err instanceof Error) {
+                        msg = err.message;
                     }
-                    break;
-
-
-                case 'openFR':
-                    vscode.commands.executeCommand('frDetector.openFR', message.frNumber, message.filePath);
-                    break;
+                    webviewView.webview.postMessage({ command: 'error', message: msg });
+                }
+            }
+            if (message.command === 'openFR') {
+                vscode.commands.executeCommand('frDetector.openFR', message.frNumber, message.filePath);
             }
         });
     }
 
-    /** Call after ingestion completes to signal that the index is ready. */
-    public refresh(): void {
-        // No-op: text filter inputs do not need to be repopulated.
-    }
+    public refresh(): void {}
 
-    private _getNonce(): string {
+    private _nonce(): string {
         const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let nonce = '';
+        let n = '';
         for (let i = 0; i < 32; i++) {
-            nonce += chars.charAt(Math.floor(Math.random() * chars.length));
+            n += chars.charAt(Math.floor(Math.random() * chars.length));
         }
-        return nonce;
+        return n;
     }
 
     private _getHtml(): string {
-        const nonce = this._getNonce();
-        return '<!DOCTYPE html>' +
-            '<html lang="en"><head>' +
-            '<meta charset="UTF-8">' +
-            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; script-src \'nonce-' + nonce + '\'; ">' +
-            '</head><body>' +
-            '<p id="probe">Loading...</p>' +
-            '<script nonce="' + nonce + '">document.getElementById(\'probe\').textContent=\'JS is running!\';</scr' + 'ipt>' +
-            '</body></html>';
+        const nonce = this._nonce();
+        return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+<style>
+body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); padding: 8px; }
+input { width: 100%; margin-bottom: 4px; padding: 4px; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, #888); }
+#status { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 4px; }
+.item { padding: 4px; margin-bottom: 4px; cursor: pointer; border-left: 2px solid transparent; }
+.item:hover { background: var(--vscode-list-hoverBackground); border-left-color: var(--vscode-focusBorder); }
+mark { background: rgba(234,92,0,0.33); }
+</style>
+</head>
+<body>
+<input id="q" type="text" placeholder="Search FR documents..." autocomplete="off">
+<input id="orig" type="text" placeholder="Originator name..." autocomplete="off">
+<input id="frn" type="text" placeholder="FR number..." autocomplete="off">
+<div id="status">Ready</div>
+<div id="list"></div>
+<script nonce="${nonce}">
+var vscode = acquireVsCodeApi();
+var timer = null;
+
+function onInput() {
+    clearTimeout(timer);
+    timer = setTimeout(doSearch, 300);
+}
+
+document.getElementById('q').addEventListener('input', onInput);
+document.getElementById('orig').addEventListener('input', onInput);
+document.getElementById('frn').addEventListener('input', onInput);
+
+function doSearch() {
+    var q = document.getElementById('q').value.trim();
+    var orig = document.getElementById('orig').value.trim();
+    var frn = document.getElementById('frn').value.trim();
+    if (!q && !orig && !frn) {
+        document.getElementById('list').innerHTML = '';
+        document.getElementById('status').textContent = 'Ready';
+        return;
     }
+    document.getElementById('status').textContent = 'Searching...';
+    vscode.postMessage({ command: 'search', query: q, filters: { originator: orig, frNumber: frn } });
+}
 
-    private _getHtmlFull(): string {
-        const nonce = this._getNonce();
+window.addEventListener('message', function(e) {
+    var msg = e.data;
+    if (msg.command === 'results') {
+        showResults(msg.results);
+    }
+    if (msg.command === 'error') {
+        showError(msg.message);
+    }
+});
 
-        const css = [
-            '*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }',
-            'body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-sideBar-background, var(--vscode-editor-background)); padding: 8px; overflow-x: hidden; }',
-            '#searchInput { width: 100%; padding: 5px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: var(--vscode-font-size); font-family: var(--vscode-font-family); outline: none; margin-bottom: 6px; }',
-            '#searchInput:focus { border-color: var(--vscode-focusBorder); }',
-            '#searchInput::placeholder { color: var(--vscode-input-placeholderForeground); }',
-            '.filters { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }',
-            '.filter-input { width: 100%; padding: 3px 8px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; font-size: 11px; font-family: var(--vscode-font-family); outline: none; }',
-            '.filter-input:focus { border-color: var(--vscode-focusBorder); }',
-            '.filter-input::placeholder { color: var(--vscode-input-placeholderForeground); }',
-            '#statusBar { font-size: 11px; color: var(--vscode-descriptionForeground); margin-bottom: 6px; min-height: 16px; padding-left: 2px; }',
-            '.result-item { padding: 6px 8px; margin-bottom: 1px; border-radius: 2px; cursor: pointer; border-left: 2px solid transparent; }',
-            '.result-item:hover { background: var(--vscode-list-hoverBackground); border-left-color: var(--vscode-focusBorder); }',
-            '.result-header { display: flex; align-items: center; gap: 5px; margin-bottom: 2px; flex-wrap: wrap; }',
-            '.fr-number { font-weight: 600; color: var(--vscode-textLink-foreground); font-size: 12px; }',
-            '.chip { font-size: 10px; padding: 1px 5px; border-radius: 10px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); white-space: nowrap; }',
-            '.result-title { font-size: 12px; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }',
-            '.result-snippet { font-size: 11px; color: var(--vscode-descriptionForeground); line-height: 1.4; word-break: break-word; }',
-            'mark { background: var(--vscode-editor-findMatchHighlightBackground, rgba(234,92,0,0.33)); color: inherit; border-radius: 2px; }',
-            '.empty-state { text-align: center; color: var(--vscode-descriptionForeground); padding: 24px 12px; font-size: 12px; line-height: 1.6; }',
-            '.empty-state strong { color: var(--vscode-foreground); }',
-        ].join(' ');
-
-        const js = [
-            'const vscode = acquireVsCodeApi();',
-            'let debounceTimer = null;',
-            'console.log("[FR Search] panel script loaded");',
-            'document.getElementById("searchInput").addEventListener("input", function() { clearTimeout(debounceTimer); debounceTimer = setTimeout(doSearch, 300); });',
-            'document.getElementById("originatorFilter").addEventListener("input", function() { clearTimeout(debounceTimer); debounceTimer = setTimeout(doSearch, 300); });',
-            'document.getElementById("frNumberFilter").addEventListener("input", function() { clearTimeout(debounceTimer); debounceTimer = setTimeout(doSearch, 300); });',
-            'function doSearch() {',
-            '  var query = document.getElementById("searchInput").value.trim();',
-            '  var originator = document.getElementById("originatorFilter").value.trim();',
-            '  var frNumber = document.getElementById("frNumberFilter").value.trim();',
-            '  if (!query && !originator && !frNumber) { document.getElementById("resultsList").innerHTML = ""; document.getElementById("statusBar").textContent = "Ready"; return; }',
-            '  console.log("[FR Search] searching:", query);',
-            '  document.getElementById("statusBar").textContent = "Searching...";',
-            '  vscode.postMessage({ command: "search", query: query, filters: { originator: originator, frNumber: frNumber } });',
-            '}',
-            'window.addEventListener("message", function(event) {',
-            '  var msg = event.data;',
-            '  console.log("[FR Search] received:", msg.command);',
-            '  if (msg.command === "results") { renderResults(msg.results); }',
-            '  else if (msg.command === "error") { handleError(msg.message); }',
-            '});',
-            'function handleError(message) {',
-            '  var list = document.getElementById("resultsList");',
-            '  document.getElementById("statusBar").textContent = "";',
-            '  if (message === "not_indexed") { list.innerHTML = "<div class=\\"empty-state\\">No documents indexed yet.<br>Run <strong>FR: Ingest Documents</strong><br>from the Command Palette.</div>"; }',
-            '  else { list.innerHTML = "<div class=\\"empty-state\\">Search error: " + escHtml(message) + "</div>"; }',
-            '}',
-            'function renderResults(results) {',
-            '  var list = document.getElementById("resultsList");',
-            '  var bar = document.getElementById("statusBar");',
-            '  if (!results || results.length === 0) { bar.textContent = "No results"; list.innerHTML = "<div class=\\"empty-state\\">No matching FR documents found.</div>"; return; }',
-            '  bar.textContent = results.length + " result" + (results.length !== 1 ? "s" : "");',
-            '  list.innerHTML = results.map(function(r) {',
-            '    var chips = [r.status, r.severity].filter(Boolean).map(function(c) { return "<span class=\\"chip\\">" + escHtml(c) + "</span>"; }).join("");',
-            '    var snippet = r.snippet ? "<div class=\\"result-snippet\\">" + highlightSnippet(r.snippet) + "</div>" : "";',
-            '    return "<div class=\\"result-item\\" data-fr=\\""+escHtml(r.frNumber)+"\\" data-fp=\\""+escHtml(r.filePath||"")+"\\">" +',
-            '      "<div class=\\"result-header\\"><span class=\\"fr-number\\">FR"+escHtml(r.frNumber)+"</span>"+chips+"</div>" +',
-            '      "<div class=\\"result-title\\">"+escHtml(r.title||"Untitled")+"</div>"+snippet+"</div>";',
-            '  }).join("");',
-            '}',
-            'function highlightSnippet(s) { return escHtml(s).replace(/&lt;&lt;/g,"<mark>").replace(/&gt;&gt;/g,"</mark>"); }',
-            'function escHtml(s) { if (!s) return ""; return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }',
-            'document.getElementById("resultsList").addEventListener("click", function(e) { var item = e.target.closest(".result-item"); if (item) { vscode.postMessage({ command: "openFR", frNumber: item.dataset.fr, filePath: item.dataset.fp }); } });',
-        ].join('\n');
-
-        return '<!DOCTYPE html>' +
-            '<html lang="en"><head>' +
-            '<meta charset="UTF-8">' +
-            '<meta name="viewport" content="width=device-width, initial-scale=1.0">' +
-            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'; script-src \'nonce-' + nonce + '\';">' +
-            '<title>FR Search</title>' +
-            '<style>' + css + '</style>' +
-            '</head><body>' +
-            '<input id="searchInput" type="text" placeholder="Search FR documents..." autocomplete="off" spellcheck="false">' +
-            '<div class="filters">' +
-            '<input id="originatorFilter" class="filter-input" type="text" placeholder="Originator name..." autocomplete="off" spellcheck="false">' +
-            '<input id="frNumberFilter" class="filter-input" type="text" placeholder="FR number (e.g. 123)..." autocomplete="off" spellcheck="false">' +
-            '</div>' +
-            '<div id="statusBar">Ready</div>' +
-            '<div id="resultsList"></div>' +
-            '<script nonce="' + nonce + '">' + js + '<\/script>' +
-            '</body></html>';
+function showError(m) {
+    document.getElementById('status').textContent = '';
+    if (m === 'not_indexed') {
+        document.getElementById('list').innerHTML = '<p>No documents indexed. Run FR: Ingest Documents.</p>';
+    } else {
+        document.getElementById('list').innerHTML = '<p>Error: ' + esc(m) + '</p>';
     }
 }
 
+function showResults(results) {
+    if (!results || results.length === 0) {
+        document.getElementById('status').textContent = 'No results';
+        document.getElementById('list').innerHTML = '<p>No matching FR documents found.</p>';
+        return;
+    }
+    document.getElementById('status').textContent = results.length + ' result(s)';
+    var html = '';
+    for (var i = 0; i < results.length; i++) {
+        var r = results[i];
+        html += '<div class="item" data-fr="' + esc(r.frNumber) + '" data-fp="' + esc(r.filePath || '') + '">';
+        html += '<b>FR' + esc(r.frNumber) + '</b> ' + esc(r.title || 'Untitled');
+        if (r.originator) {
+            html += '<br>Originator: ' + esc(r.originator);
+        }
+        if (r.snippet) {
+            html += '<br><small>' + hilite(r.snippet) + '</small>';
+        }
+        html += '</div>';
+    }
+    document.getElementById('list').innerHTML = html;
+}
+
+function hilite(s) {
+    return esc(s).replace(/&lt;&lt;/g, '<mark>').replace(/&gt;&gt;/g, '<\/mark>');
+}
+
+function esc(s) {
+    if (!s) { return ''; }
+    s = String(s);
+    s = s.replace(/&/g, '&amp;');
+    s = s.replace(/</g, '&lt;');
+    s = s.replace(/>/g, '&gt;');
+    s = s.replace(/"/g, '&quot;');
+    return s;
+}
+
+document.getElementById('list').addEventListener('click', function(e) {
+    var item = e.target.closest('.item');
+    if (item) {
+        vscode.postMessage({ command: 'openFR', frNumber: item.dataset.fr, filePath: item.dataset.fp });
+    }
+});
+<\/script>
+</body>
+</html>`;
+    }
+}
