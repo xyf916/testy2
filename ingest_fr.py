@@ -28,7 +28,7 @@ except ImportError:
     DOCX_AVAILABLE = False
 
 try:
-    import win32com.client
+    import win32com.client  # type: ignore[import]
     WIN32_AVAILABLE = True
 except ImportError:
     WIN32_AVAILABLE = False
@@ -39,18 +39,12 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 def init_search_db(db_path):
-    """Create fr_documents and fr_fts tables if they don't exist."""
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.executescript('''
         CREATE TABLE IF NOT EXISTS fr_documents (
             fr_number   TEXT PRIMARY KEY,
             title       TEXT,
-            subsystem   TEXT,
-            severity    TEXT,
-            status      TEXT,
-            date_str    TEXT,
-            authors     TEXT,
             originator  TEXT,
             file_path   TEXT,
             ingested_at INTEGER
@@ -64,40 +58,15 @@ def init_search_db(db_path):
         );
     ''')
     conn.commit()
-    # Migration: add originator column if it was missing from an older schema
-    try:
-        conn.execute("ALTER TABLE fr_documents ADD COLUMN originator TEXT DEFAULT ''")
-        conn.commit()
-    except Exception:
-        pass  # column already exists
     conn.close()
 
 
-def upsert_document(conn, fr_number, title, meta, file_path, body_text):
-    """Insert or replace one document in both structured and FTS tables."""
-    # Remove stale FTS entry first (INSERT OR REPLACE on fr_documents changes nothing
-    # in fr_fts, so we delete+insert explicitly)
+def upsert_document(conn, fr_number, title, originator, file_path, body_text):
     conn.execute("DELETE FROM fr_fts WHERE fr_number = ?", (fr_number,))
-
     conn.execute(
-        '''INSERT OR REPLACE INTO fr_documents
-               (fr_number, title, subsystem, severity, status,
-                date_str, authors, originator, file_path, ingested_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-        (
-            fr_number,
-            title,
-            meta.get("subsystem", ""),
-            meta.get("severity", ""),
-            meta.get("status", ""),
-            meta.get("date_str", ""),
-            meta.get("authors", ""),
-            meta.get("originator", ""),
-            file_path,
-            int(time.time()),
-        ),
+        'INSERT OR REPLACE INTO fr_documents (fr_number, title, originator, file_path, ingested_at) VALUES (?, ?, ?, ?, ?)',
+        (fr_number, title, originator, file_path, int(time.time())),
     )
-
     conn.execute(
         "INSERT INTO fr_fts (fr_number, title, body_text) VALUES (?, ?, ?)",
         (fr_number, title, body_text),
@@ -108,25 +77,11 @@ def upsert_document(conn, fr_number, title, meta, file_path, body_text):
 # Metadata extraction (best-effort)
 # ---------------------------------------------------------------------------
 
-def extract_metadata(text):
-    """Try to find structured fields anywhere in the document body."""
-    meta = {"status": "", "severity": "", "subsystem": "", "date_str": "", "authors": "", "originator": ""}
-
-    patterns = {
-        "status":     r'status\s*[:\-]\s*([^\n\r,;]{1,40})',
-        "severity":   r'severity\s*[:\-]\s*([^\n\r,;]{1,40})',
-        "subsystem":  r'subsystem\s*[:\-]\s*([^\n\r,;]{1,60})',
-        "date_str":   r'(?:date|dated)\s*[:\-]\s*([^\n\r,;]{1,30})',
-        "authors":    r'(?:author|prepared\s+by|written\s+by|submitted\s+by)\s*[:\-]\s*([^\n\r,;]{1,80})',
-        "originator": r'originator(?:\s+name)?\s*[:\-]\s*([^\n\r,;]{1,80})',
-    }
-
-    for field, pattern in patterns.items():
-        m = re.search(pattern, text, re.IGNORECASE)
-        if m:
-            meta[field] = m.group(1).strip()
-
-    return meta
+def extract_originator(text):
+    m = re.search(r'originator(?:\s+name)?\s*[:\-]\s*([^\n\r,;]{1,80})', text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +129,7 @@ def read_doc_for_ingest(file_path):
     if not WIN32_AVAILABLE:
         raise ValueError("pywin32 not installed. Run: pip install pywin32")
 
-    import pythoncom
+    import pythoncom  # type: ignore[import]
     pythoncom.CoInitialize()
     try:
         word = win32com.client.Dispatch("Word.Application")
@@ -289,8 +244,8 @@ def run_ingestion(db_path, root_folders, include_patterns, exclude_patterns):
             else:
                 continue
 
-            meta = extract_metadata(body)
-            upsert_document(conn, fr_number, title, meta, file_path, body)
+            originator = extract_originator(body)
+            upsert_document(conn, fr_number, title, originator, file_path, body)
             count += 1
 
             # Commit in batches to avoid holding a huge transaction
