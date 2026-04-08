@@ -140,7 +140,7 @@ export function activate(context: vscode.ExtensionContext) {
                     quickPick.items = results.map((r) => ({
                         label:       `FR${r.frNumber}`,
                         description: r.title || '',
-                        detail:      [r.status, r.severity, r.subsystem].filter(Boolean).join('  ·  ') || r.snippet || '',
+                        detail:      r.originator || r.snippet || '',
                     }));
                 } catch (err: unknown) {
                     const msg = err instanceof Error ? err.message : String(err);
