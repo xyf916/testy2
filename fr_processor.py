@@ -209,41 +209,56 @@ def read_docx(file_path):
     }
 
 
-def read_doc_with_win32(file_path):
+def doc_to_docx(file_path):
+    """Convert a .doc file to a temp .docx using Word, return the temp path."""
     import win32com.client  # type: ignore[import]
     import pythoncom  # type: ignore[import]
+    import tempfile
+    import shutil
+
+    tmp_dir = tempfile.gettempdir()
+    pid = os.getpid()
+    # Copy the .doc to a temp location so Word lock files don't block us
+    tmp_doc  = os.path.join(tmp_dir, f"fr_tmp_{pid}.doc")
+    tmp_docx = os.path.join(tmp_dir, f"fr_tmp_{pid}.docx")
+    shutil.copy2(file_path, tmp_doc)
 
     pythoncom.CoInitialize()
+    word = None
     try:
-        word = win32com.client.Dispatch("Word.Application")
+        word = win32com.client.DispatchEx("Word.Application")
         word.Visible = False
-        doc = word.Documents.Open(os.path.abspath(file_path))
-        content = doc.Content.Text
-        doc.Close()
-        word.Quit()
-
-        lines = content.split("\n")
-        title = lines[0].strip() if lines else ""
-
-        return {
-            "title": title,
-            "status": "",
-            "content": content,
-            "headings": [title] if title else [],
-            "html": "<p>" + escape_html(content).replace("\n", "</p><p>") + "</p>",
-            "filePath": file_path
-        }
+        word.DisplayAlerts = 0
+        doc = word.Documents.Open(os.path.abspath(tmp_doc))
+        doc.SaveAs(tmp_docx, FileFormat=16)  # 16 = wdFormatXMLDocument (.docx)
+        doc.Close(0)
     finally:
+        try:
+            if word:
+                word.Quit()
+        except Exception:
+            pass
         pythoncom.CoUninitialize()
+        try:
+            os.remove(tmp_doc)
+        except Exception:
+            pass
+    return tmp_docx
 
 
 def read_doc(file_path):
-    if "win32com" in DOC_CONVERTERS:
+    if "win32com" not in DOC_CONVERTERS:
+        raise ValueError("pywin32 not installed. Run: pip install pywin32")
+    tmp = doc_to_docx(file_path)
+    try:
+        result = read_docx(tmp)
+        result["filePath"] = file_path
+        return result
+    finally:
         try:
-            return read_doc_with_win32(file_path)
-        except Exception as e:
+            os.remove(tmp)
+        except Exception:
             pass
-    raise ValueError("Cannot read .doc file. Install pywin32: pip install pywin32")
 
 
 # ---------------------------------------------------------------------------
