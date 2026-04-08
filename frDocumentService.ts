@@ -24,17 +24,8 @@ export interface FRSearchResult {
     frNumber: string;
     title: string;
     snippet: string;
-    subsystem: string;
-    severity: string;
-    status: string;
     filePath: string;
     originator: string;
-}
-
-export interface FRFilterOptions {
-    statuses: string[];
-    severities: string[];
-    subsystems: string[];
 }
 
 export class FRDocumentService {
@@ -180,7 +171,7 @@ export class FRDocumentService {
             }
             return null;
         } catch (error) {
-            console.error(`Error getting FR preview: ${error}`);
+            // console.error(`Error getting FR preview: ${error}`);
             throw error;
         }
     }
@@ -207,7 +198,7 @@ export class FRDocumentService {
             }
             return null;
         } catch (error) {
-            console.error(`Error getting FR content: ${error}`);
+            // console.error(`Error getting FR content: ${error}`);
             throw error;
         }
     }
@@ -225,7 +216,7 @@ export class FRDocumentService {
             }
             return null;
         } catch (error) {
-            console.error(`Error getting FR content by path: ${error}`);
+            // console.error(`Error getting FR content by path: ${error}`);
             throw error;
         }
     }
@@ -261,15 +252,6 @@ export class FRDocumentService {
             throw new Error(parsed.error);
         }
         return parsed.results || [];
-    }
-
-    async getFilterOptions(): Promise<FRFilterOptions> {
-        try {
-            const result = await this.executePythonScript(['filter_options', this.dbPath]);
-            return JSON.parse(result) as FRFilterOptions;
-        } catch {
-            return { statuses: [], severities: [], subsystems: [] };
-        }
     }
 
     // -------------------------------------------------------------------------
