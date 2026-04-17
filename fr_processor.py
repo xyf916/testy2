@@ -103,21 +103,29 @@ def clear_db(db_path):
 def find_fr_file(fr_number, fr_folder):
     fr_num = int(fr_number)
     folder_base = (fr_num // 100) * 100
-    subfolder_name = f"FR{folder_base}s"
-
-    patterns = [
-        os.path.join(fr_folder, subfolder_name, f"FR{fr_number}.docx"),
-        os.path.join(fr_folder, subfolder_name, f"FR{fr_number}.doc"),
-        os.path.join(fr_folder, f"FR{fr_number}.docx"),
-        os.path.join(fr_folder, f"FR{fr_number}.doc"),
+    # Subfolders are named Fr0200, FR0200, Fr14100, FR14100, etc. (4-digit zero-padded, no trailing 's')
+    subfolder_padded = f"{folder_base:04d}"
+    subfolder_candidates = [
+        f"Fr{subfolder_padded}",
+        f"FR{subfolder_padded}",
+        f"fr{subfolder_padded}",
     ]
 
-    for pattern in patterns:
-        if os.path.exists(pattern):
-            return pattern
+    for subfolder_name in subfolder_candidates:
+        for ext in [".docx", ".doc"]:
+            p = os.path.join(fr_folder, subfolder_name, f"FR{fr_number}{ext}")
+            if os.path.exists(p):
+                return p
 
+    # Direct in root
     for ext in [".docx", ".doc"]:
-        matches = glob.glob(os.path.join(fr_folder, "**", f"*FR{fr_number}*{ext}"), recursive=True)
+        p = os.path.join(fr_folder, f"FR{fr_number}{ext}")
+        if os.path.exists(p):
+            return p
+
+    # Fallback: recursive glob (handles any case variation or zero-padding in filename)
+    for ext in [".docx", ".doc"]:
+        matches = glob.glob(os.path.join(fr_folder, "**", f"*{fr_number}*{ext}"), recursive=True)
         if matches:
             return matches[0]
 
@@ -276,47 +284,26 @@ def search_fr(db_path, query, originator_filter="", fr_number_filter="", limit=5
             return {"results": [], "error": "not_indexed"}
 
         q = (query or "").strip()
-        params = []
-
-        if q:
-            sql = (
-                "SELECT fr_fts.fr_number, fr_fts.title,"
-                " snippet(fr_fts, 2, '<<', '>>', '...', 20),"
-                " d.file_path, COALESCE(d.originator, '')"
-                " FROM fr_fts JOIN fr_documents d ON d.fr_number = fr_fts.fr_number"
-                " WHERE fr_fts MATCH ?"
-            )
-            params.append(q)
-            if originator_filter:
-                sql += " AND COALESCE(d.originator, '') LIKE ?"
-                params.append('%' + originator_filter + '%')
-            if fr_number_filter:
-                sql += " AND d.fr_number LIKE ?"
-                params.append('%' + fr_number_filter + '%')
-            sql += " ORDER BY rank LIMIT ?"
-            params.append(limit)
-            try:
-                rows = conn.execute(sql, params).fetchall()
-                conn.close()
-                return {"results": _rows_to_results(rows)}
-            except Exception:
-                pass
 
         sql = (
-            "SELECT fr_number, title, '' AS snippet, file_path,"
-            " COALESCE(originator, '') FROM fr_documents WHERE 1=1"
+            "SELECT d.fr_number, d.title, '' AS snippet, d.file_path,"
+            " COALESCE(d.originator, '')"
+            " FROM fr_documents d"
+            " JOIN fr_fts f ON f.fr_number = d.fr_number"
+            " WHERE 1=1"
         )
         params = []
         if q:
-            sql += " AND title LIKE ?"
+            sql += " AND (d.title LIKE ? OR f.body_text LIKE ?)"
+            params.append('%' + q + '%')
             params.append('%' + q + '%')
         if originator_filter:
-            sql += " AND COALESCE(originator, '') LIKE ?"
+            sql += " AND COALESCE(d.originator, '') LIKE ?"
             params.append('%' + originator_filter + '%')
         if fr_number_filter:
-            sql += " AND fr_number LIKE ?"
+            sql += " AND d.fr_number LIKE ?"
             params.append('%' + fr_number_filter + '%')
-        sql += " ORDER BY CAST(fr_number AS INTEGER) LIMIT ?"
+        sql += " ORDER BY CAST(d.fr_number AS INTEGER) LIMIT ?"
         params.append(limit)
         rows = conn.execute(sql, params).fetchall()
         conn.close()
