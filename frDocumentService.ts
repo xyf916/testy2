@@ -105,7 +105,7 @@ export class FRDocumentService {
         try {
             if (!fs.existsSync(folderPath)) { return false; }
             const entries = fs.readdirSync(folderPath);
-            return entries.some(e => /^FR\d+s$/i.test(e));
+            return entries.some(e => /^fr\d+$/i.test(e));
         } catch {
             return false;
         }
